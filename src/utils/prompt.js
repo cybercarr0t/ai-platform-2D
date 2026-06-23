@@ -22,7 +22,7 @@ export function buildSideViewPrompt(description, columns, rows) {
     `Each frame shows a different side-view animation pose.`,
     `Consistent character scale across all frames.`,
     `Clean outlines, flat shading, uniform lighting.`,
-    `Transparent or solid-color background.`,
+    `Background MUST be pure white (#FFFFFF), fully opaque, with no gradients, no transparency, no patterns. This is required for automated sprite extraction.`,
     `Evenly spaced grid with no overlapping frames.`,
   ].join(' ')
 }
@@ -44,7 +44,7 @@ export function buildTopDownPrompt(description, columns, rows) {
     `Each frame captures a different direction or pose from the top-down view.`,
     `Consistent character scale across all frames.`,
     `Clean outlines, flat shading, uniform lighting.`,
-    `Transparent or solid-color background.`,
+    `Background MUST be pure white (#FFFFFF), fully opaque, with no gradients, no transparency, no patterns. This is required for automated sprite extraction.`,
     `Evenly spaced grid with no overlapping frames.`,
   ].join(' ')
 }

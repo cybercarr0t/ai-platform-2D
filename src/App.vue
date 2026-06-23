@@ -8,7 +8,7 @@
         <h1 class="topbar-title">Cybercarrot 2D AI Platform</h1>
       </div>
       <div class="topbar-right">
-        <ApiConfig ref="apiConfigRef" />
+        <ApiConfig @update="apiConfigState = $event" />
       </div>
     </header>
 
@@ -33,31 +33,21 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import ApiConfig from './components/ApiConfig.vue'
 import Console from './components/Console.vue'
 import Generator from './components/Generator.vue'
 import ImageGenerator from './components/ImageGenerator.vue'
 
 const activeView = ref('image-gen')
-const apiConfigRef = ref(null)
 
-const apiConfigState = computed(() => {
-  const comp = apiConfigRef.value
-  if (!comp) {
-    return {
-      endpoint: 'https://api.openai.com',
-      apiKey: '',
-      model: 'gemini-3.1-flash-image-preview',
-      isValid: false,
-    }
-  }
-  return {
-    endpoint: comp.endpoint,
-    apiKey: comp.apiKey,
-    model: comp.model,
-    isValid: comp.isValid,
-  }
+// API 配置状态：由 ApiConfig 通过 @update 事件向上同步。
+// 兜底默认值与 ApiConfig 内部一致；ApiConfig 挂载后会立即 emit 真实值覆盖。
+const apiConfigState = ref({
+  endpoint: 'https://www.packyapi.com',
+  apiKey: '',
+  model: 'gpt-image-2',
+  isValid: false,
 })
 </script>
 

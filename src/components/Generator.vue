@@ -43,31 +43,12 @@
 
         <!-- 参考概念图 -->
         <label class="field">
-          <span class="field-label">参考概念图 <em>(可选)</em></span>
-          <div
-            class="drop-zone"
-            :class="{ 'has-image': refImagePreview }"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="handleDrop"
-          >
-            <template v-if="refImagePreview">
-              <img :src="refImagePreview" alt="参考图预览" class="preview-img" />
-              <button class="btn-remove" @click="clearRefImage" title="移除图片">✕</button>
-            </template>
-            <template v-else>
-              <div class="drop-placeholder">
-                <span class="drop-icon">📁</span>
-                <span class="drop-hint">拖拽图片到此处，或点击选择文件</span>
-              </div>
-            </template>
-            <input
-              type="file"
-              accept="image/*"
-              class="file-input"
-              @change="handleImageUpload"
-            />
-          </div>
+          <span class="field-label">参考概念图 <em>(可选，作为图生图参考)</em></span>
+          <ImageDropZone
+            :preview="refImagePreview"
+            @select="setRefImage"
+            @remove="clearRefImage"
+          />
         </label>
 
         <!-- 网格设置 -->
@@ -107,15 +88,8 @@
           </div>
         </div>
 
-        <label class="field">
-          <span class="field-label">图片尺寸</span>
-          <input
-            v-model="size"
-            type="text"
-            placeholder="1024x1024"
-            class="size-input"
-          />
-        </label>
+        <!-- 高级参数（OpenAI image API 原生字段，下拉选单） -->
+        <ImageParamsPanel v-model="imageParams" />
       </div>
 
       <div class="card-footer">
@@ -132,7 +106,7 @@
     <div class="output-section">
       <div v-if="loading" class="status loading">
         <span class="spinner-lg"></span>
-        <p>正在调用 AI 生成精灵图，通常需要 10-30 秒...</p>
+        <p>正在调用 AI 生成精灵图，通常需要 1-3 分钟，请耐心等待...</p>
       </div>
 
       <div v-if="error && !loading" class="status error">
@@ -147,8 +121,8 @@
           </div>
           <img :src="resultUrl" alt="生成的 Sprite Sheet" class="result-img" />
         </div>
-        <button class="btn-download" @click="downloadImage">
-          ⬇️ 下载 PNG
+        <button class="btn-download" @click="downloadImage('sprite-sheet')">
+          ⬇️ 下载图片
         </button>
       </template>
 
@@ -161,9 +135,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { buildSideViewPrompt, buildTopDownPrompt } from '../utils/prompt.js'
-import { generateImageGemini } from '../utils/api.js'
+import { useImageGeneration } from '../composables/useImageGeneration.js'
+import ImageDropZone from './ImageDropZone.vue'
+import ImageParamsPanel from './ImageParamsPanel.vue'
 
 const props = defineProps({
   apiConfig: { type: Object, required: true },
@@ -172,6 +148,24 @@ const props = defineProps({
 // ---- 视角模式：side（横版）| topdown（俯视 8 方向） ----
 const viewMode = ref('side')
 
+// ---- 网格参数（本面板私有） ----
+const columns = ref(4)
+const rows = ref(4)
+
+// 输入边界保护：clamp 到 [1, 8]，防止用户键盘输入越界值污染 prompt
+watch(columns, (v) => {
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n) || n < 1) columns.value = 1
+  else if (n > 8) columns.value = 8
+  else if (n !== v) columns.value = n
+})
+watch(rows, (v) => {
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n) || n < 1) rows.value = 1
+  else if (n > 8) rows.value = 8
+  else if (n !== v) rows.value = n
+})
+
 // ---- placeholder 根据视角动态切换 ----
 const placeholderText = computed(() =>
   viewMode.value === 'side'
@@ -179,91 +173,25 @@ const placeholderText = computed(() =>
     : '描述你要生成的角色或对象\n\n例如：一个魔法师，戴尖顶帽穿长袍，手持法杖'
 )
 
-// ---- 输入 ----
-const description = ref('')
-const columns = ref(4)
-const rows = ref(4)
-const size = ref('1024x1024')
-const refImage = ref(null)
-const refImagePreview = ref(null)
-const dragOver = ref(false)
+// ---- prompt 组装：根据当前视角模式分发 ----
+const buildPrompt = (desc) =>
+  viewMode.value === 'topdown'
+    ? buildTopDownPrompt(desc, columns.value, rows.value)
+    : buildSideViewPrompt(desc, columns.value, rows.value)
 
-// ---- 输出 ----
-const resultUrl = ref(null)
-const loading = ref(false)
-const error = ref(null)
-
-// ---- 参考图操作 ----
-function handleImageUpload(event) {
-  const file = event.target.files?.[0]
-  if (file) setRefImage(file)
-}
-function handleDrop(event) {
-  dragOver.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (file && file.type.startsWith('image/')) setRefImage(file)
-}
-function setRefImage(file) {
-  refImage.value = file
-  if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-  refImagePreview.value = URL.createObjectURL(file)
-}
-function clearRefImage() {
-  if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-  refImage.value = null
-  refImagePreview.value = null
-}
-
-// ---- 生成 ----
-async function generate() {
-  error.value = null
-
-  if (!props.apiConfig.isValid) {
-    error.value = '请先在顶部栏配置 API 密钥'
-    return
-  }
-  if (!description.value.trim()) {
-    error.value = '请输入角色描述'
-    return
-  }
-
-  loading.value = true
-  try {
-    // 根据视角模式拼装不同的 prompt
-    let prompt
-    if (viewMode.value === 'topdown') {
-      prompt = buildTopDownPrompt(description.value.trim(), columns.value, rows.value)
-    } else {
-      prompt = buildSideViewPrompt(description.value.trim(), columns.value, rows.value)
-    }
-
-    if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
-    resultUrl.value = null
-
-    resultUrl.value = await generateImageGemini(props.apiConfig, prompt, refImage.value, size.value)
-  } catch (e) {
-    error.value = `生成失败：${e.message}`
-  } finally {
-    loading.value = false
-  }
-}
-
-// ---- 下载 ----
-function downloadImage() {
-  if (!resultUrl.value) return
-  const a = document.createElement('a')
-  a.href = resultUrl.value
-  a.download = 'sprite-sheet.png'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-}
-
-// ---- 清理 ----
-onUnmounted(() => {
-  if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-  if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
-})
+// ---- 复用通用图像生成逻辑 ----
+const {
+  description,
+  imageParams,
+  refImagePreview,
+  resultUrl,
+  loading,
+  error,
+  setRefImage,
+  clearRefImage,
+  generate,
+  downloadImage,
+} = useImageGeneration(() => props.apiConfig, buildPrompt)
 </script>
 
 <style scoped>
@@ -391,97 +319,6 @@ onUnmounted(() => {
 }
 .field textarea::placeholder {
   color: #484f58;
-}
-
-/* ---- 尺寸输入 ---- */
-.size-input {
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border, #21262d);
-  background: var(--bg-input, #0d1117);
-  color: #e6edf3;
-  font-size: 14px;
-  outline: none;
-  width: 160px;
-  font-family: inherit;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.size-input:focus {
-  border-color: #58a6ff;
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
-}
-.size-input::placeholder {
-  color: #484f58;
-}
-
-/* ---- 拖拽上传 ---- */
-.drop-zone {
-  position: relative;
-  height: 160px;
-  border: 2px dashed #21262d;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  overflow: hidden;
-  transition: all 0.2s;
-  background: rgba(0, 0, 0, 0.1);
-}
-.drop-zone:hover {
-  border-color: #58a6ff;
-  background: rgba(88, 166, 255, 0.04);
-}
-.drop-zone.has-image {
-  border-style: solid;
-  border-color: #30363d;
-}
-.file-input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.drop-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-}
-.drop-icon {
-  font-size: 28px;
-  opacity: 0.6;
-}
-.drop-hint {
-  color: #484f58;
-  font-size: 13px;
-}
-.preview-img {
-  max-height: 100%;
-  max-width: 100%;
-  object-fit: contain;
-  pointer-events: none;
-}
-.btn-remove {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
-  font-size: 13px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-}
-.btn-remove:hover {
-  background: #f85149;
 }
 
 /* ---- 网格设置 ---- */

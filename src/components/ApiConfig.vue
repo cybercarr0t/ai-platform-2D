@@ -1,5 +1,5 @@
 <template>
-  <!-- API 配置：顶部栏弹出式面板，数据持久化到 localStorage -->
+  <!-- API 配置：顶部栏弹出式面板，数据持久化到 localStorage，并通过 emit 向父组件同步 -->
   <div class="api-config" ref="rootEl">
     <button class="api-trigger" @click="toggle">
       <span class="trigger-icon">⚙️</span>
@@ -21,7 +21,7 @@
             <input
               v-model="endpoint"
               type="text"
-              placeholder="https://api.openai.com"
+              placeholder="https://www.packyapi.com"
             />
           </label>
           <label class="field">
@@ -37,7 +37,7 @@
             <input
               v-model="model"
               type="text"
-              placeholder="dall-e-3"
+              placeholder="gpt-image-2"
             />
           </label>
           <div class="popover-actions">
@@ -51,13 +51,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 const STORAGE_KEY = 'sprite-sheet-config'
 
-const endpoint = ref('https://api.openai.com')
+// 默认值：OpenAI 兼容 image API，packyapi 网关，gpt-image-2 模型
+const DEFAULT_ENDPOINT = 'https://www.packyapi.com'
+const DEFAULT_MODEL = 'gpt-image-2'
+
+const endpoint = ref(DEFAULT_ENDPOINT)
 const apiKey = ref('')
-const model = ref('gemini-3.1-flash-image-preview')
+const model = ref(DEFAULT_MODEL)
 const open = ref(false)
 const savedHint = ref('')
 const rootEl = ref(null)
@@ -65,7 +69,20 @@ const popoverStyle = ref({})
 
 const isValid = computed(() => apiKey.value.trim().length > 0)
 
+const emit = defineEmits(['update'])
+
+// 向父组件同步当前配置快照（修复旧版通过 defineExpose pull 导致的响应式断链）
+function emitUpdate() {
+  emit('update', {
+    endpoint: endpoint.value,
+    apiKey: apiKey.value,
+    model: model.value,
+    isValid: isValid.value,
+  })
+}
+
 onMounted(() => {
+  // 从 localStorage 恢复配置
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
@@ -75,12 +92,26 @@ onMounted(() => {
       if (config.model) model.value = config.model
     }
   } catch {
-    // 数据损坏则忽略
+    // 数据损坏则忽略，使用默认值
   }
+  // 挂载后立即向父组件同步一次（含恢复的配置）
+  emitUpdate()
+
+  // 窗口尺寸变化时重新定位面板
+  window.addEventListener('resize', updatePosition)
+  document.addEventListener('keydown', onKeydown)
 })
 
+onUnmounted(() => {
+  window.removeEventListener('resize', updatePosition)
+  document.removeEventListener('keydown', onKeydown)
+})
+
+// 任意字段变化时实时向上同步（无需等待保存）
+watch([endpoint, apiKey, model], emitUpdate)
+
 function updatePosition() {
-  if (!rootEl.value) return
+  if (!open.value || !rootEl.value) return
   const btn = rootEl.value.querySelector('.api-trigger')
   if (!btn) return
   const rect = btn.getBoundingClientRect()
@@ -110,18 +141,18 @@ function saveConfig() {
 
 function handleSave() {
   saveConfig()
+  emitUpdate()
+  // 提示 2 秒后与关闭面板同时进行，确保用户能看到保存反馈
   savedHint.value = '✅ 配置已保存'
-  setTimeout(() => (savedHint.value = ''), 2000)
-  setTimeout(() => (open.value = false), 600)
+  setTimeout(() => {
+    savedHint.value = ''
+    open.value = false
+  }, 1500)
 }
 
 function onKeydown(e) {
   if (e.key === 'Escape') close()
 }
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onUnmounted(() => document.removeEventListener('keydown', onKeydown))
-
-defineExpose({ endpoint, apiKey, model, isValid })
 </script>
 
 <style scoped>

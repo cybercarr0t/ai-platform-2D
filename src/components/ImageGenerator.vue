@@ -19,42 +19,16 @@
         </label>
 
         <label class="field">
-          <span class="field-label">参考概念图 <em>(可选)</em></span>
-          <div
-            class="drop-zone"
-            :class="{ 'has-image': refImagePreview }"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="handleDrop"
-          >
-            <template v-if="refImagePreview">
-              <img :src="refImagePreview" alt="参考图预览" class="preview-img" />
-              <button class="btn-remove" @click="clearRefImage" title="移除图片">✕</button>
-            </template>
-            <template v-else>
-              <div class="drop-placeholder">
-                <span class="drop-icon">📁</span>
-                <span class="drop-hint">拖拽图片到此处，或点击选择文件</span>
-              </div>
-            </template>
-            <input
-              type="file"
-              accept="image/*"
-              class="file-input"
-              @change="handleImageUpload"
-            />
-          </div>
-        </label>
-
-        <label class="field">
-          <span class="field-label">图片尺寸</span>
-          <input
-            v-model="size"
-            type="text"
-            placeholder="1024x1024"
-            class="size-input"
+          <span class="field-label">参考概念图 <em>(可选，作为图生图参考)</em></span>
+          <ImageDropZone
+            :preview="refImagePreview"
+            @select="setRefImage"
+            @remove="clearRefImage"
           />
         </label>
+
+        <!-- 高级参数（OpenAI image API 原生字段，下拉选单） -->
+        <ImageParamsPanel v-model="imageParams" />
       </div>
 
       <div class="card-footer">
@@ -71,7 +45,7 @@
     <div class="output-section">
       <div v-if="loading" class="status loading">
         <span class="spinner-lg"></span>
-        <p>正在调用 AI 生成图像，通常需要 10-30 秒...</p>
+        <p>正在调用 AI 生成图像，通常需要 1-3 分钟，请耐心等待...</p>
       </div>
 
       <div v-if="error && !loading" class="status error">
@@ -86,8 +60,8 @@
           </div>
           <img :src="resultUrl" alt="生成的图像" class="result-img" />
         </div>
-        <button class="btn-download" @click="downloadImage">
-          ⬇️ 下载 PNG
+        <button class="btn-download" @click="downloadImage('generated-image')">
+          ⬇️ 下载图片
         </button>
       </template>
 
@@ -100,94 +74,34 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
-import { generateImageGemini } from '../utils/api.js'
+import { useImageGeneration } from '../composables/useImageGeneration.js'
+import ImageDropZone from './ImageDropZone.vue'
+import ImageParamsPanel from './ImageParamsPanel.vue'
 
 const props = defineProps({
   apiConfig: { type: Object, required: true },
 })
 
 // ---- placeholder ----
-const placeholderText = '描述你要生成的图像\n\n例如：像素风格的游戏背包道具，一把散发着火焰光芒的传说级长剑，32x32 像素'
+const placeholderText =
+  '描述你要生成的图像\n\n例如：像素风格的游戏背包道具，一把散发着火焰光芒的传说级长剑，32x32 像素'
 
-// ---- 输入 ----
-const description = ref('')
-const size = ref('1024x1024')
-const refImage = ref(null)
-const refImagePreview = ref(null)
-const dragOver = ref(false)
+// ---- prompt 直接透传用户原始描述 ----
+const buildPrompt = (desc) => desc
 
-// ---- 输出 ----
-const resultUrl = ref(null)
-const loading = ref(false)
-const error = ref(null)
-
-// ---- 参考图操作 ----
-function handleImageUpload(event) {
-  const file = event.target.files?.[0]
-  if (file) setRefImage(file)
-}
-function handleDrop(event) {
-  dragOver.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (file && file.type.startsWith('image/')) setRefImage(file)
-}
-function setRefImage(file) {
-  refImage.value = file
-  if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-  refImagePreview.value = URL.createObjectURL(file)
-}
-function clearRefImage() {
-  if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-  refImage.value = null
-  refImagePreview.value = null
-}
-
-// ---- 生成 ----
-async function generate() {
-  error.value = null
-
-  if (!props.apiConfig.isValid) {
-    error.value = '请先在顶部栏配置 API 密钥'
-    return
-  }
-  if (!description.value.trim()) {
-    error.value = '请输入图像描述'
-    return
-  }
-
-  loading.value = true
-  try {
-    // 不做任何 prompt 包装，直接发送用户原始输入（用于测试/调试 API）
-    const prompt = description.value.trim()
-
-    if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
-    resultUrl.value = null
-
-    resultUrl.value = await generateImageGemini(props.apiConfig, prompt, refImage.value, size.value)
-  } catch (e) {
-    error.value = `生成失败：${e.message}`
-  } finally {
-    loading.value = false
-  }
-}
-
-// ---- 下载 ----
-function downloadImage() {
-  if (!resultUrl.value) return
-  const a = document.createElement('a')
-  a.href = resultUrl.value
-  a.download = 'generated-image.png'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-}
-
-// ---- 清理 ----
-onUnmounted(() => {
-  if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-  if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
-})
+// ---- 复用通用图像生成逻辑 ----
+const {
+  description,
+  imageParams,
+  refImagePreview,
+  resultUrl,
+  loading,
+  error,
+  setRefImage,
+  clearRefImage,
+  generate,
+  downloadImage,
+} = useImageGeneration(() => props.apiConfig, buildPrompt)
 </script>
 
 <style scoped>
@@ -270,97 +184,6 @@ onUnmounted(() => {
 }
 .field textarea::placeholder {
   color: #484f58;
-}
-
-/* ---- 尺寸输入 ---- */
-.size-input {
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border, #21262d);
-  background: var(--bg-input, #0d1117);
-  color: #e6edf3;
-  font-size: 14px;
-  outline: none;
-  width: 160px;
-  font-family: inherit;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.size-input:focus {
-  border-color: #58a6ff;
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
-}
-.size-input::placeholder {
-  color: #484f58;
-}
-
-/* ---- 拖拽上传 ---- */
-.drop-zone {
-  position: relative;
-  height: 160px;
-  border: 2px dashed #21262d;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  overflow: hidden;
-  transition: all 0.2s;
-  background: rgba(0, 0, 0, 0.1);
-}
-.drop-zone:hover {
-  border-color: #58a6ff;
-  background: rgba(88, 166, 255, 0.04);
-}
-.drop-zone.has-image {
-  border-style: solid;
-  border-color: #30363d;
-}
-.file-input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.drop-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-}
-.drop-icon {
-  font-size: 28px;
-  opacity: 0.6;
-}
-.drop-hint {
-  color: #484f58;
-  font-size: 13px;
-}
-.preview-img {
-  max-height: 100%;
-  max-width: 100%;
-  object-fit: contain;
-  pointer-events: none;
-}
-.btn-remove {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
-  font-size: 13px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-}
-.btn-remove:hover {
-  background: #f85149;
 }
 
 /* ---- 生成按钮 ---- */
