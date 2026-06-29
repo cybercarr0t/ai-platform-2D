@@ -88,6 +88,13 @@
           </div>
         </div>
 
+        <!-- Prompt 配置（system / style / content，可编辑，有默认） -->
+        <PromptConfigPanel
+          v-model="promptOverrides"
+          mode="sprite-sheet"
+          :preview="promptPreviewData"
+        />
+
         <!-- 高级参数（OpenAI image API 原生字段，下拉选单） -->
         <ImageParamsPanel v-model="imageParams" />
       </div>
@@ -135,11 +142,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { buildSideViewPrompt, buildTopDownPrompt } from '../utils/prompt.js'
+import { ref, computed, watch, onMounted } from 'vue'
+import { buildPromptConfig, DEFAULT_PROMPT_CONFIG } from '../utils/prompt.js'
 import { useImageGeneration } from '../composables/useImageGeneration.js'
 import ImageDropZone from './ImageDropZone.vue'
 import ImageParamsPanel from './ImageParamsPanel.vue'
+import PromptConfigPanel from './PromptConfigPanel.vue'
 
 const props = defineProps({
   apiConfig: { type: Object, required: true },
@@ -173,15 +181,38 @@ const placeholderText = computed(() =>
     : '描述你要生成的角色或对象\n\n例如：一个魔法师，戴尖顶帽穿长袍，手持法杖'
 )
 
-// ---- prompt 组装：根据当前视角模式分发 ----
-const buildPrompt = (desc) =>
-  viewMode.value === 'topdown'
-    ? buildTopDownPrompt(desc, columns.value, rows.value)
-    : buildSideViewPrompt(desc, columns.value, rows.value)
+// ---- prompt 组装：根据当前视角模式分发，返回结构化对象 ----
+const buildPrompt = (desc, overrides) =>
+  buildPromptConfig(
+    {
+      mode: 'sprite-sheet',
+      description: desc,
+      view: viewMode.value,
+      columns: columns.value,
+      rows: rows.value,
+    },
+    overrides
+  )
+
+// ---- 预览用 data（随视角/网格/描述实时变化，传给 PromptConfigPanel） ----
+const promptPreviewData = computed(() => {
+  const obj = buildPromptConfig(
+    {
+      mode: 'sprite-sheet',
+      description: description.value || '<你的描述>',
+      view: viewMode.value,
+      columns: columns.value,
+      rows: rows.value,
+    },
+    {}
+  )
+  return obj.data
+})
 
 // ---- 复用通用图像生成逻辑 ----
 const {
   description,
+  promptOverrides,
   imageParams,
   refImagePreview,
   resultUrl,
@@ -191,7 +222,17 @@ const {
   clearRefImage,
   generate,
   downloadImage,
-} = useImageGeneration(() => props.apiConfig, buildPrompt)
+} = useImageGeneration(() => props.apiConfig, buildPrompt, {
+  storageKey: 'prompt-config:sprite-sheet',
+})
+
+// 首次挂载若 localStorage 无自定义配置，注入 sprite-sheet 默认 system/style/content
+onMounted(() => {
+  const def = DEFAULT_PROMPT_CONFIG['sprite-sheet']
+  if (!promptOverrides.system) promptOverrides.system = def.system
+  if (!promptOverrides.style) promptOverrides.style = def.style
+  if (!promptOverrides.content) promptOverrides.content = def.content
+})
 </script>
 
 <style scoped>

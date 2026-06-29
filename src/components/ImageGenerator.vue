@@ -27,6 +27,13 @@
           />
         </label>
 
+        <!-- Prompt 配置（system / style / content，可编辑，有默认） -->
+        <PromptConfigPanel
+          v-model="promptOverrides"
+          mode="basic"
+          :preview="promptPreviewData"
+        />
+
         <!-- 高级参数（OpenAI image API 原生字段，下拉选单） -->
         <ImageParamsPanel v-model="imageParams" />
       </div>
@@ -74,9 +81,12 @@
 </template>
 
 <script setup>
+import { computed, onMounted } from 'vue'
+import { buildPromptConfig, DEFAULT_PROMPT_CONFIG } from '../utils/prompt.js'
 import { useImageGeneration } from '../composables/useImageGeneration.js'
 import ImageDropZone from './ImageDropZone.vue'
 import ImageParamsPanel from './ImageParamsPanel.vue'
+import PromptConfigPanel from './PromptConfigPanel.vue'
 
 const props = defineProps({
   apiConfig: { type: Object, required: true },
@@ -86,12 +96,19 @@ const props = defineProps({
 const placeholderText =
   '描述你要生成的图像\n\n例如：像素风格的游戏背包道具，一把散发着火焰光芒的传说级长剑，32x32 像素'
 
-// ---- prompt 直接透传用户原始描述 ----
-const buildPrompt = (desc) => desc
+// ---- prompt 组装：basic 模式，返回结构化对象 ----
+const buildPrompt = (desc, overrides) =>
+  buildPromptConfig({ mode: 'basic', description: desc }, overrides)
+
+// ---- 预览用 data（传给 PromptConfigPanel） ----
+const promptPreviewData = computed(() => ({
+  description: description.value || '<你的描述>',
+}))
 
 // ---- 复用通用图像生成逻辑 ----
 const {
   description,
+  promptOverrides,
   imageParams,
   refImagePreview,
   resultUrl,
@@ -101,7 +118,17 @@ const {
   clearRefImage,
   generate,
   downloadImage,
-} = useImageGeneration(() => props.apiConfig, buildPrompt)
+} = useImageGeneration(() => props.apiConfig, buildPrompt, {
+  storageKey: 'prompt-config:image-gen',
+})
+
+// 首次挂载若 localStorage 无自定义配置，注入 basic 默认 system/style/content
+onMounted(() => {
+  const def = DEFAULT_PROMPT_CONFIG.basic
+  if (!promptOverrides.system) promptOverrides.system = def.system
+  if (!promptOverrides.style) promptOverrides.style = def.style
+  if (!promptOverrides.content) promptOverrides.content = def.content
+})
 </script>
 
 <style scoped>
