@@ -1,21 +1,39 @@
-import { ref, reactive, onUnmounted } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { generateImage } from '../utils/api.js'
+import { serializePrompt } from '../utils/prompt.js'
 
 /**
  * 图像生成的可复用状态与逻辑
  *
  * 封装两个生成面板（Generator / ImageGenerator）共享的全部行为：
- * 参考图上传/预览/清理、生成调用、结果展示与下载、blob URL 生命周期管理。
+ * 参考图上传/预览/清理、prompt 配置编辑与持久化、生成调用、结果展示与下载、blob URL 生命周期管理。
  *
  * 响应式说明：getConfig 通过函数读取，确保 generate() 执行时实时拿到最新配置，
  * 避免父组件持有过期引用（修复旧版 ApiConfig→App 响应式断链问题）。
  *
+ * prompt 现为结构化对象 { system, style, content, data }：
+ *   - system/style/content：用户可编辑，存于 promptOverrides，按 storageKey 持久化到 localStorage
+ *   - data：由 buildPrompt 根据面板控件（描述、网格、视角）实时填充
+ * buildPrompt 返回该对象，generate() 调用 serializePrompt 包成 { prompt: {...} } JSON 字符串发往 API。
+ *
  * @param {() => Object} getConfig - 返回当前 apiConfig 的函数（响应式读取）
- * @param {(description: string) => string} buildPrompt - 由调用方提供的 prompt 组装函数
+ * @param {(description: string, overrides: Object) => Object} buildPrompt
+ *        由调用方提供的 prompt 组装函数，返回 { system, style, content, data }
+ * @param {Object} opts
+ * @param {string} opts.storageKey - promptOverrides 持久化的 localStorage key
  */
-export function useImageGeneration(getConfig, buildPrompt) {
+export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
+  const storageKey = opts.storageKey || 'prompt-config'
+
   // ---- 输入 ----
   const description = ref('')
+
+  // prompt 可编辑三字段（system/style/content），data 由 buildPrompt 现填
+  const promptOverrides = reactive({
+    system: '',
+    style: '',
+    content: '',
+  })
 
   // OpenAI image API 参数（全部对应 gpt-image 系列原生字段）
   const imageParams = reactive({
@@ -35,6 +53,29 @@ export function useImageGeneration(getConfig, buildPrompt) {
   const resultUrl = ref(null)
   const loading = ref(false)
   const error = ref(null)
+
+  // ---- prompt 配置持久化 ----
+  onMounted(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        const cfg = JSON.parse(saved)
+        if (typeof cfg.system === 'string') promptOverrides.system = cfg.system
+        if (typeof cfg.style === 'string') promptOverrides.style = cfg.style
+        if (typeof cfg.content === 'string') promptOverrides.content = cfg.content
+      }
+    } catch {
+      // 数据损坏则忽略，使用面板挂载后注入的默认值
+    }
+  })
+
+  // 任意字段变化时持久化
+  watch(promptOverrides, () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ ...promptOverrides })
+    )
+  })
 
   // ---- 参考图操作 ----
   function setRefImage(file) {
@@ -66,7 +107,9 @@ export function useImageGeneration(getConfig, buildPrompt) {
 
     loading.value = true
     try {
-      const prompt = buildPrompt(description.value.trim())
+      // buildPrompt 返回结构化对象，再包成 { prompt: {...} } JSON 字符串
+      const promptObj = buildPrompt(description.value.trim(), promptOverrides)
+      const prompt = serializePrompt(promptObj)
 
       if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
       resultUrl.value = null
@@ -126,6 +169,7 @@ export function useImageGeneration(getConfig, buildPrompt) {
   return {
     // state
     description,
+    promptOverrides,
     imageParams,
     refImage,
     refImagePreview,

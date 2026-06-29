@@ -45,12 +45,14 @@ API 调用规则（见 `src/utils/api.js`）：
     │   ├── Console.vue              # 左侧导航控制台（可折叠，状态持久化）
     │   ├── ImageDropZone.vue        # 通用图片上传区（拖拽/点击，v-model 同步 File）
     │   ├── Generator.vue            # Sprite Sheet 生成面板（横版 / 俯视 8 方向）
-    │   └── ImageGenerator.vue       # 基础图像生成面板
+    │   ├── ImageGenerator.vue       # 基础图像生成面板
+    │   ├── ImageParamsPanel.vue     # OpenAI image API 高级参数面板（尺寸/质量/格式等）
+    │   └── PromptConfigPanel.vue    # Prompt 配置面板（编辑 system/style/content + 预览 JSON）
     ├── composables/
-    │   └── useImageGeneration.js    # 图像生成可复用逻辑（state + 生成/下载/清理）
+    │   └── useImageGeneration.js    # 图像生成可复用逻辑（state + prompt 配置持久化 + 生成/下载/清理）
     └── utils/
         ├── api.js                   # OpenAI image API 调用（generations / edits）
-        └── prompt.js                # sprite sheet prompt 组装（横版 / 俯视）
+        └── prompt.js                # prompt 拆分（system/style/content/data）+ 默认配置 + 序列化
 ```
 
 ## 架构与数据流
@@ -61,20 +63,38 @@ localStorage ──→ ApiConfig ──emit('update')──→ App(apiConfigStat
                                                    ↓ props.apiConfig
 用户输入 ──→ Generator / ImageGenerator
               │
-              ├─ useImageGeneration(getConfig, buildPrompt)
+              ├─ useImageGeneration(getConfig, buildPrompt, { storageKey })
               │     ├─ getConfig = () => props.apiConfig  （实时读取，避免响应式断链）
-              │     ├─ buildPrompt：Generator 按视角分发，ImageGenerator 原样透传
-              │     └─ generateImage(config, prompt, refImage, size)
+              │     ├─ promptOverrides：system/style/content（localStorage 持久化）
+              │     ├─ buildPrompt：组装 { system, style, content, data } 对象
+              │     │     ├─ Generator：按视角/网格填 data（view/perspective/columns/rows/frames/directions）
+              │     │     └─ ImageGenerator：basic 模式，data 仅 description
+              │     ├─ serializePrompt → JSON.stringify({ prompt: {...} })
+              │     └─ generateImage(config, promptJson, refImage, size)
               │           ├─ 无参考图 → /v1/images/generations
               │           └─ 有参考图 → /v1/images/edits
               │
               └─ resultUrl（blob URL）──→ <img> 展示 + 下载按钮
 ```
 
+### Prompt 结构
+
+发给模型的 `prompt` 字段为 `{ prompt: {...} }` 的 JSON 字符串，内层拆成四块：
+
+| 字段 | 含义 | 来源 |
+|----|----|----|
+| `system` | 稳定指令（网格规则、白底约束、无重叠） | 用户编辑 + 默认值，localStorage 持久化 |
+| `style` | 画风（pixel-art / 平涂阴影 / 统一光照） | 同上 |
+| `content` | 角色/内容物（character / game art asset） | 同上 |
+| `data` | 每次变化的量（描述、视角、列行数、帧数、方向） | 面板控件实时填充 |
+
+默认配置见 `src/utils/prompt.js` 的 `DEFAULT_PROMPT_CONFIG`（`sprite-sheet` / `basic` 两套）。
+持久化 key：`prompt-config:sprite-sheet`、`prompt-config:image-gen`。
+
 ### 关键设计
 
 - **配置响应式**：ApiConfig 通过 `emit('update', config)` 向上同步，App 用 `ref` 持有并作为 prop 下发。`useImageGeneration` 的 `getConfig` 是函数，在 `generate()` 执行时实时读取 `props.apiConfig`，从机制上避免旧版通过 `defineExpose` 跨组件 pull 导致的响应式断链。
-- **逻辑复用**：两个生成面板共享 `useImageGeneration` composable（参考图、生成、下载、blob URL 生命周期）与 `ImageDropZone` 组件，各自只保留独有 UI（视角切换 / 网格设置）与 prompt 组装。
+- **逻辑复用**：两个生成面板共享 `useImageGeneration` composable（prompt 配置持久化、参考图、生成、下载、blob URL 生命周期）与 `ImageDropZone`、`ImageParamsPanel`、`PromptConfigPanel` 组件，各自只保留独有 UI（视角切换 / 网格设置）与 data 填充。
 - **blob URL 生命周期**：参考图预览与生成结果均为 blob URL，在替换与组件卸载时 `revokeObjectURL`，避免内存泄漏。
 
 ## 规则

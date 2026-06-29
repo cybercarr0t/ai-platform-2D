@@ -15,7 +15,7 @@
  * 兜底 data[0].b64_json 转 blob URL。
  *
  * @param {Object} config - API 配置 { endpoint, apiKey, model, isValid }
- * @param {string} prompt - 文本 prompt
+ * @param {string} prompt - 文本 prompt（现为 { prompt: { system, style, content, data } } 的 JSON 字符串）
  * @param {File|null} refImage - 参考概念图；非空时走 edits 端点
  * @param {Object} [params] - 图像参数 { size, quality, background, output_format, output_compression, moderation }
  * @returns {Promise<string>} 生成图片的 blob URL
