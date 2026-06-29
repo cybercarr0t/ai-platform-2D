@@ -142,7 +142,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { buildPromptConfig, DEFAULT_PROMPT_CONFIG } from '../utils/prompt.js'
 import { useImageGeneration } from '../composables/useImageGeneration.js'
 import ImageDropZone from './ImageDropZone.vue'
@@ -224,14 +224,7 @@ const {
   downloadImage,
 } = useImageGeneration(() => props.apiConfig, buildPrompt, {
   storageKey: 'prompt-config:sprite-sheet',
-})
-
-// 首次挂载若 localStorage 无自定义配置，注入 sprite-sheet 默认 system/style/content
-onMounted(() => {
-  const def = DEFAULT_PROMPT_CONFIG['sprite-sheet']
-  if (!promptOverrides.system) promptOverrides.system = def.system
-  if (!promptOverrides.style) promptOverrides.style = def.style
-  if (!promptOverrides.content) promptOverrides.content = def.content
+  defaults: DEFAULT_PROMPT_CONFIG['sprite-sheet'],
 })
 </script>
 

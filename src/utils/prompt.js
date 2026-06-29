@@ -31,7 +31,9 @@ export const DEFAULT_PROMPT_CONFIG = {
     content: 'character',
   },
   basic: {
-    system: '',
+    system:
+      'Generate a single clean game art asset on a plain background, ' +
+      'no text, no watermark, no border, centered and fully visible.',
     style: 'pixel-art, clean outlines, flat shading, uniform lighting',
     content: 'game art asset',
   },

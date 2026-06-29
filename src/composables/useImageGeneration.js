@@ -21,18 +21,22 @@ import { serializePrompt } from '../utils/prompt.js'
  *        由调用方提供的 prompt 组装函数，返回 { system, style, content, data }
  * @param {Object} opts
  * @param {string} opts.storageKey - promptOverrides 持久化的 localStorage key
+ * @param {{system:string, style:string, content:string}} opts.defaults
+ *        system/style/content 的默认值；首次渲染即填入，挂载后由 localStorage 覆盖
  */
 export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
   const storageKey = opts.storageKey || 'prompt-config'
+  const defaults = opts.defaults || { system: '', style: '', content: '' }
 
   // ---- 输入 ----
   const description = ref('')
 
-  // prompt 可编辑三字段（system/style/content），data 由 buildPrompt 现填
+  // prompt 可编辑三字段（system/style/content），用默认值初始化，保证首次渲染即显示；
+  // data 由 buildPrompt 现填。挂载后若 localStorage 有自定义值则覆盖。
   const promptOverrides = reactive({
-    system: '',
-    style: '',
-    content: '',
+    system: defaults.system,
+    style: defaults.style,
+    content: defaults.content,
   })
 
   // OpenAI image API 参数（全部对应 gpt-image 系列原生字段）
@@ -60,12 +64,13 @@ export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
       const saved = localStorage.getItem(storageKey)
       if (saved) {
         const cfg = JSON.parse(saved)
-        if (typeof cfg.system === 'string') promptOverrides.system = cfg.system
-        if (typeof cfg.style === 'string') promptOverrides.style = cfg.style
-        if (typeof cfg.content === 'string') promptOverrides.content = cfg.content
+        // 仅当 localStorage 中存在对应字段时覆盖默认值，避免空值清掉默认
+        if (typeof cfg.system === 'string' && cfg.system) promptOverrides.system = cfg.system
+        if (typeof cfg.style === 'string' && cfg.style) promptOverrides.style = cfg.style
+        if (typeof cfg.content === 'string' && cfg.content) promptOverrides.content = cfg.content
       }
     } catch {
-      // 数据损坏则忽略，使用面板挂载后注入的默认值
+      // 数据损坏则忽略，保留默认值
     }
   })
 
