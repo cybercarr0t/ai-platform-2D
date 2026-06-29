@@ -41,13 +41,14 @@
           ></textarea>
         </label>
 
-        <!-- 参考概念图 -->
+        <!-- 参考图（可多选，最多 16 张，作为图生图参考） -->
         <label class="field">
-          <span class="field-label">参考概念图 <em>(可选，作为图生图参考)</em></span>
+          <span class="field-label">参考图 <em>(可选，可多选，最多 16 张，作为图生图参考)</em></span>
           <ImageDropZone
-            :preview="refImagePreview"
-            @select="setRefImage"
-            @remove="clearRefImage"
+            :previews="refImagePreviews"
+            @select="addRefImages"
+            @remove="removeRefImage"
+            @clear="clearRefImages"
           />
         </label>
 
@@ -214,12 +215,13 @@ const {
   description,
   promptOverrides,
   imageParams,
-  refImagePreview,
+  refImagePreviews,
   resultUrl,
   loading,
   error,
-  setRefImage,
-  clearRefImage,
+  addRefImages,
+  removeRefImage,
+  clearRefImages,
   generate,
   downloadImage,
 } = useImageGeneration(() => props.apiConfig, buildPrompt, {

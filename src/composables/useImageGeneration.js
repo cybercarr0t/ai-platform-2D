@@ -49,14 +49,41 @@ export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
     moderation: 'auto',      // auto / low
   })
 
-  const refImage = ref(null)
-  const refImagePreview = ref(null)
+  const refImages = ref([])
+  const refImagePreviews = ref([])
   const dragOver = ref(false)
 
   // ---- 输出 ----
   const resultUrl = ref(null)
   const loading = ref(false)
   const error = ref(null)
+
+  // ---- 参考图操作（多图，上限 16） ----
+  const MAX_REF_IMAGES = 16
+
+  // 追加多张参考图：为每个 File 创建 blob URL 预览，与 refImages 同顺序
+  function addRefImages(files) {
+    const list = Array.isArray(files) ? files : [files]
+    for (const file of list) {
+      if (refImages.value.length >= MAX_REF_IMAGES) break
+      refImages.value.push(file)
+      refImagePreviews.value.push(URL.createObjectURL(file))
+    }
+  }
+
+  // 移除指定索引的参考图：revoke 对应预览后 splice
+  function removeRefImage(index) {
+    if (index < 0 || index >= refImagePreviews.value.length) return
+    URL.revokeObjectURL(refImagePreviews.value[index])
+    refImages.value.splice(index, 1)
+    refImagePreviews.value.splice(index, 1)
+  }
+
+  function clearRefImages() {
+    for (const url of refImagePreviews.value) URL.revokeObjectURL(url)
+    refImages.value = []
+    refImagePreviews.value = []
+  }
 
   // ---- prompt 配置持久化 ----
   onMounted(() => {
@@ -82,19 +109,6 @@ export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
     )
   })
 
-  // ---- 参考图操作 ----
-  function setRefImage(file) {
-    if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-    refImage.value = file
-    refImagePreview.value = URL.createObjectURL(file)
-  }
-
-  function clearRefImage() {
-    if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
-    refImage.value = null
-    refImagePreview.value = null
-  }
-
   // ---- 生成 ----
   async function generate() {
     error.value = null
@@ -119,7 +133,7 @@ export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
       if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
       resultUrl.value = null
 
-      resultUrl.value = await generateImage(config, prompt, refImage.value, imageParams)
+      resultUrl.value = await generateImage(config, prompt, refImages.value, imageParams)
     } catch (e) {
       error.value = `生成失败：${e.message}`
     } finally {
@@ -167,7 +181,7 @@ export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
 
   // ---- 清理 blob URL，避免内存泄漏 ----
   onUnmounted(() => {
-    if (refImagePreview.value) URL.revokeObjectURL(refImagePreview.value)
+    for (const url of refImagePreviews.value) URL.revokeObjectURL(url)
     if (resultUrl.value) URL.revokeObjectURL(resultUrl.value)
   })
 
@@ -176,15 +190,16 @@ export function useImageGeneration(getConfig, buildPrompt, opts = {}) {
     description,
     promptOverrides,
     imageParams,
-    refImage,
-    refImagePreview,
+    refImages,
+    refImagePreviews,
     dragOver,
     resultUrl,
     loading,
     error,
     // methods
-    setRefImage,
-    clearRefImage,
+    addRefImages,
+    removeRefImage,
+    clearRefImages,
     generate,
     downloadImage,
   }

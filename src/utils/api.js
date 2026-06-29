@@ -2,7 +2,7 @@
  * 调用 OpenAI 兼容图像生成 API
  *
  * - 无参考图：POST {endpoint}/v1/images/generations（JSON）
- * - 有参考图：POST {endpoint}/v1/images/edits（multipart/form-data，图生图）
+ * - 有参考图：POST {endpoint}/v1/images/edits（multipart/form-data，图生图，支持 1–16 张）
  *
  * 请求参数（gpt-image 系列原生参数，缺失字段用默认值兜底）：
  *   model, prompt, n=1, size, quality, background, output_format,
@@ -11,16 +11,19 @@
  * 不传 response_format——packyapi 网关对部分请求会返回
  * "Unknown parameter: 'response_format'"，删掉后 API 默认即返回 url。
  *
+ * edits 多图：参考图以重复的 image[] 字段上传（含单图也用 image[]），
+ * 顺序即上传顺序，对应 prompt 中的 "image 1 / image 2 / ..."；上限 16 张。
+ *
  * 响应解析：直接返回 data[0].url（不 fetch，规避图床 CORS）；
  * 兜底 data[0].b64_json 转 blob URL。
  *
  * @param {Object} config - API 配置 { endpoint, apiKey, model, isValid }
  * @param {string} prompt - 文本 prompt（现为 { prompt: { system, style, content, data } } 的 JSON 字符串）
- * @param {File|null} refImage - 参考概念图；非空时走 edits 端点
+ * @param {File[]} refImages - 参考图数组；非空时走 edits 端点
  * @param {Object} [params] - 图像参数 { size, quality, background, output_format, output_compression, moderation }
  * @returns {Promise<string>} 生成图片的 blob URL
  */
-export async function generateImage(config, prompt, refImage = null, params = {}) {
+export async function generateImage(config, prompt, refImages = [], params = {}) {
   // 参数默认值兜底，保证不带 params 也能工作
   const p = {
     size: 'auto',
@@ -32,8 +35,14 @@ export async function generateImage(config, prompt, refImage = null, params = {}
     ...params,
   }
 
+  // 归一化为数组并过滤非文件项
+  const images = Array.isArray(refImages) ? refImages.filter(Boolean) : []
+  if (images.length > 16) {
+    throw new Error('参考图最多 16 张，请移除多余的图片')
+  }
+
   const base = config.endpoint.replace(/\/$/, '')
-  const url = `${base}/v1/images/${refImage ? 'edits' : 'generations'}`
+  const url = `${base}/v1/images/${images.length > 0 ? 'edits' : 'generations'}`
 
   // 图像生成（尤其 high 质量 / 大尺寸）耗时较长，给 5 分钟超时
   const controller = new AbortController()
@@ -47,12 +56,14 @@ export async function generateImage(config, prompt, refImage = null, params = {}
       signal: controller.signal,
     }
 
-    if (refImage) {
-      // edits：multipart 上传参考图文件 + 全部参数作为 form 字段
+    if (images.length > 0) {
+      // edits：multipart 上传参考图（每张用 image[] 字段，顺序即上传顺序）+ 全部参数作为 form 字段
       const form = new FormData()
       form.append('model', config.model)
       form.append('prompt', prompt)
-      form.append('image', refImage)
+      for (const file of images) {
+        form.append('image[]', file)
+      }
       form.append('n', '1')
       form.append('size', p.size)
       form.append('quality', p.quality)

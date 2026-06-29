@@ -24,7 +24,7 @@
 API 调用规则（见 `src/utils/api.js`）：
 
 - **无参考图** → `POST {endpoint}/v1/images/generations`（JSON body：`{ model, prompt, n, size }`）
-- **有参考图** → `POST {endpoint}/v1/images/edits`（multipart/form-data：`model, prompt, image, n, size`），实现图生图
+- **有参考图** → `POST {endpoint}/v1/images/edits`（multipart/form-data：`model, prompt, image[]×N, n, size, ...`），实现图生图；支持 1–16 张参考图，每张以重复的 `image[]` 字段上传，顺序对应 prompt 中的 "image 1 / image 2 / ..."
 
 响应解析优先取 `data[0].b64_json`，其次 `data[0].url`，转为 blob URL 展示。
 
@@ -43,7 +43,7 @@ API 调用规则（见 `src/utils/api.js`）：
     ├── components/
     │   ├── ApiConfig.vue            # API 配置面板（localStorage 持久化 + emit 同步）
     │   ├── Console.vue              # 左侧导航控制台（可折叠，状态持久化）
-    │   ├── ImageDropZone.vue        # 通用图片上传区（拖拽/点击，v-model 同步 File）
+    │   ├── ImageDropZone.vue        # 多图上传区（拖拽/点击多选，缩略图网格，v-model 同步 File[]）
     │   ├── Generator.vue            # Sprite Sheet 生成面板（横版 / 俯视 8 方向）
     │   ├── ImageGenerator.vue       # 基础图像生成面板
     │   ├── ImageParamsPanel.vue     # OpenAI image API 高级参数面板（尺寸/质量/格式等）
@@ -70,9 +70,9 @@ localStorage ──→ ApiConfig ──emit('update')──→ App(apiConfigStat
               │     │     ├─ Generator：按视角/网格填 data（view/perspective/columns/rows/frames/directions）
               │     │     └─ ImageGenerator：basic 模式，data 仅 description
               │     ├─ serializePrompt → JSON.stringify({ prompt: {...} })
-              │     └─ generateImage(config, promptJson, refImage, size)
-              │           ├─ 无参考图 → /v1/images/generations
-              │           └─ 有参考图 → /v1/images/edits
+              │     └─ generateImage(config, promptJson, refImages, params)
+              │           ├─ refImages 为空 → /v1/images/generations
+              │           └─ refImages 非空 → /v1/images/edits（image[]×N，上限 16）
               │
               └─ resultUrl（blob URL）──→ <img> 展示 + 下载按钮
 ```
